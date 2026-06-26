@@ -12,6 +12,7 @@
 #include <linux/backing-file.h>
 #include <linux/splice.h>
 #include <linux/mm.h>
+#include <linux/security.h>
 
 #include "internal.h"
 
@@ -29,11 +30,12 @@
  * returned file into a container structure that also stores the stacked
  * file's path, which can be retrieved using backing_file_user_path().
  */
-struct file *backing_file_open(const struct path *user_path, int flags,
+struct file *backing_file_open(const struct file *user_file, int flags,
 			       const struct path *real_path,
 			       const struct cred *cred)
 {
 	struct inode *real_inode = d_inode(real_path->dentry);
+	const struct path *user_path = &user_file->f_path;
 	struct file *f;
 	int error;
 
@@ -48,7 +50,7 @@ struct file *backing_file_open(const struct path *user_path, int flags,
 			return ERR_PTR(-EPERM);
 	}
 
-	f = alloc_empty_backing_file(flags, cred);
+	f = alloc_empty_backing_file(flags, cred, user_file);
 	if (IS_ERR(f))
 		return f;
 
@@ -64,15 +66,16 @@ struct file *backing_file_open(const struct path *user_path, int flags,
 }
 EXPORT_SYMBOL_GPL(backing_file_open);
 
-struct file *backing_tmpfile_open(const struct path *user_path, int flags,
+struct file *backing_tmpfile_open(const struct file *user_file, int flags,
 				  const struct path *real_parentpath,
 				  umode_t mode, const struct cred *cred)
 {
 	struct mnt_idmap *real_idmap = mnt_idmap(real_parentpath->mnt);
+	const struct path *user_path = &user_file->f_path;
 	struct file *f;
 	int error;
 
-	f = alloc_empty_backing_file(flags, cred);
+	f = alloc_empty_backing_file(flags, cred, user_file);
 	if (IS_ERR(f))
 		return f;
 
@@ -370,6 +373,12 @@ int backing_file_mmap(struct file *file, struct vm_area_struct *vma,
 	vma_set_file(vma, file);
 
 	old_cred = override_creds(ctx->cred);
+	ret = security_mmap_backing_file(vma, file, user_file);
+	if (ret) {
+		revert_creds(old_cred);
+		return ret;
+	}
+
 	ret = vfs_mmap(vma->vm_file, vma);
 	revert_creds(old_cred);
 
