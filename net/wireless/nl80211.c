@@ -19237,6 +19237,14 @@ static int nl80211_pre_doit(const struct genl_split_ops *ops,
 		wiphy_lock(&rdev->wiphy);
 		if (ops->cmd == NL80211_CMD_VENDOR)
 			ctx->need_rtnl |= nl80211_vendor_cmd_needs_rtnl(rdev, info);
+		if (rdev->wiphy.flags & WIPHY_FLAG_DISCOVERY_NEEDS_RTNL) {
+			switch (ops->cmd) {
+			case NL80211_CMD_TRIGGER_SCAN:
+			case NL80211_CMD_REMAIN_ON_CHANNEL:
+				ctx->need_rtnl = true;
+				break;
+			}
+		}
 		/* we keep the mutex locked until post_doit */
 		__release(&rdev->wiphy.mtx);
 	}
