@@ -5925,11 +5925,16 @@ struct wiphy_coalesce_support {
  * @WIPHY_VENDOR_CMD_NEED_NETDEV: vendor command requires netdev
  * @WIPHY_VENDOR_CMD_NEED_RUNNING: interface/wdev must be up & running
  *	(must be combined with %_WDEV or %_NETDEV)
+ * @WIPHY_VENDOR_CMD_NEED_RTNL: retain RTNL across the doit callback, acquired
+ *	before the wiphy mutex, for commands which change network interfaces.
+ *	The callback must return with both locks held. This flag does not affect
+ *	dump callbacks. Published vendor command tables must remain immutable.
  */
 enum wiphy_vendor_command_flags {
 	WIPHY_VENDOR_CMD_NEED_WDEV = BIT(0),
 	WIPHY_VENDOR_CMD_NEED_NETDEV = BIT(1),
 	WIPHY_VENDOR_CMD_NEED_RUNNING = BIT(2),
+	WIPHY_VENDOR_CMD_NEED_RTNL = BIT(3),
 };
 
 /**
