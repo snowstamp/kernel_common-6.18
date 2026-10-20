@@ -204,6 +204,8 @@ struct snd_usb_substream {
 
 	bool trigger_tstamp_pending_update; /* trigger timestamp being updated from initial estimate */
 	bool lowlatency_playback;	/* low-latency playback mode */
+	/* Successful open retained its runtime PM vote; not a mutable policy flag. */
+	bool runtime_pm_held;
 	struct media_ctl *media_ctl;
 
 	ANDROID_KABI_RESERVE(1);
