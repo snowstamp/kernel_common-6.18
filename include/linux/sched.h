@@ -2380,6 +2380,9 @@ static inline bool owner_on_cpu(struct task_struct *owner)
 	return READ_ONCE(owner->on_cpu) && !vcpu_is_preempted(task_cpu(owner));
 }
 
+/* Returns capped CFS utilization, including UTIL_EST, without contention boosting. */
+unsigned long cpu_util_cfs(int cpu);
+
 /* Returns effective CPU energy utilization, as seen by the scheduler */
 unsigned long sched_cpu_util(int cpu);
 
