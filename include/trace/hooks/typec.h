@@ -11,6 +11,20 @@
 
 struct tcpm_port;
 
+#ifndef TYPEC_TIMER
+#define TYPEC_TIMER
+enum typec_timer {
+	SINK_WAIT_CAP,
+	SOURCE_OFF,
+	CC_DEBOUNCE,
+	SINK_DISCOVERY_BC12,
+};
+#endif
+
+DECLARE_HOOK(android_vh_typec_tcpm_get_timer,
+	TP_PROTO(const char *state, enum typec_timer timer, unsigned int *msecs),
+	TP_ARGS(state, timer, msecs));
+
 DECLARE_HOOK(android_vh_typec_store_partner_src_caps,
 	TP_PROTO(struct tcpm_port *port, unsigned int *nr_source_caps,
 		 u32 (*source_caps)[PDO_MAX_OBJECTS]),
@@ -21,7 +35,7 @@ DECLARE_HOOK(android_vh_typec_tcpm_log,
 	TP_ARGS(log, bypass));
 
 DECLARE_HOOK(android_vh_typec_tcpm_modify_src_caps,
-	TP_PROTO(unsigned int *nr_src_pdo, u32 (*src_pdo)[], bool *modified),
+	TP_PROTO(unsigned int *nr_src_pdo, u32 (*src_pdo)[PDO_MAX_OBJECTS], bool *modified),
 	TP_ARGS(nr_src_pdo, src_pdo, modified));
 
 #endif
