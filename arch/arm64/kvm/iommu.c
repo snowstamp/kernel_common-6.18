@@ -41,6 +41,14 @@ extern size_t kvm_nvhe_sym(hyp_kvm_iommu_pages);
 static DEFINE_MUTEX(kvm_iommu_reg_lock);
 /* Protected by kvm_iommu_reg_lock. */
 static LIST_HEAD(kvm_iommu_drivers);
+static bool kvm_iommu_registration_closed;
+
+bool kvm_iommu_registration_is_open(void)
+{
+	guard(mutex)(&kvm_iommu_reg_lock);
+	return !kvm_iommu_registration_closed;
+}
+EXPORT_SYMBOL_GPL(kvm_iommu_registration_is_open);
 
 int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops, size_t pool_pages)
 {
@@ -50,6 +58,8 @@ int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops, size_t pool_pag
 		return -ENODEV;
 
 	guard(mutex)(&kvm_iommu_reg_lock);
+	if (kvm_iommu_registration_closed)
+		return -EPERM;
 	/* See kvm_iommu_pages() */
 	if (pool_pages + requested_pool_pages > kvm_nvhe_sym(hyp_kvm_iommu_pages)) {
 		kvm_err("Missing memory for the IOMMU pool, need 0x%zx pages, check kvm-arm.hyp_iommu_pages",
@@ -93,6 +103,7 @@ int kvm_iommu_init_driver(void)
 	int ret = -ENODEV;
 
 	guard(mutex)(&kvm_iommu_reg_lock);
+	kvm_iommu_registration_closed = true;
 
 	list_for_each_entry(driver, &kvm_iommu_drivers, node) {
 		if (driver->init_driver) {

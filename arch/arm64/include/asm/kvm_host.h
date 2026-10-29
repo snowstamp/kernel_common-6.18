@@ -2031,6 +2031,7 @@ struct kvm_iommu_driver {
 
 struct kvm_iommu_ops;
 struct kvm_iommu_sg;
+bool kvm_iommu_registration_is_open(void);
 int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops,
 			      size_t pool_pages);
 
