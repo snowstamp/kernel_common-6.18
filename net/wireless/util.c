@@ -1137,6 +1137,46 @@ void cfg80211_upload_connect_keys(struct wireless_dev *wdev)
 	wdev->connect_keys = NULL;
 }
 
+static void cfg80211_process_ch_switch_event(struct wireless_dev *wdev,
+					     struct cfg80211_event *ev)
+{
+	unsigned int link_id = ev->link_id;
+
+	lockdep_assert_wiphy(wdev->wiphy);
+
+	if (!wdev->registered || !wdev->netdev || !netif_running(wdev->netdev) ||
+	    wdev->iftype != ev->cs.iftype)
+		return;
+
+	if (wdev->valid_links ? !(wdev->valid_links & BIT(link_id)) : link_id != 0)
+		return;
+
+	switch (wdev->iftype) {
+	case NL80211_IFTYPE_STATION:
+	case NL80211_IFTYPE_P2P_CLIENT:
+		if (!wdev->links[link_id].client.current_bss)
+			return;
+		break;
+	case NL80211_IFTYPE_AP:
+	case NL80211_IFTYPE_P2P_GO:
+		if (!wdev->links[link_id].ap.beacon_interval)
+			return;
+		break;
+	case NL80211_IFTYPE_ADHOC:
+		if (!wdev->u.ibss.ssid_len)
+			return;
+		break;
+	case NL80211_IFTYPE_MESH_POINT:
+		if (!wdev->u.mesh.id_len)
+			return;
+		break;
+	default:
+		return;
+	}
+
+	cfg80211_ch_switch_notify(wdev->netdev, &ev->cs.chandef, link_id);
+}
+
 void cfg80211_process_wdev_events(struct wireless_dev *wdev)
 {
 	struct cfg80211_event *ev;
@@ -1179,6 +1219,9 @@ void cfg80211_process_wdev_events(struct wireless_dev *wdev)
 
 			cfg80211_leave_locked(wiphy_to_rdev(wdev->wiphy), wdev,
 					      ev->link_id);
+			break;
+		case EVENT_CH_SWITCH:
+			cfg80211_process_ch_switch_event(wdev, ev);
 			break;
 		case EVENT_PORT_AUTHORIZED:
 			__cfg80211_port_authorized(wdev, ev->pa.peer_addr,

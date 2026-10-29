@@ -9953,6 +9953,45 @@ void cfg80211_ch_switch_notify(struct net_device *dev,
 			       unsigned int link_id);
 
 /**
+ * cfg80211_ch_switch_notify_queued - queue a channel switch notification
+ * @dev: the device which switched channels
+ * @chandef: the new channel definition, copied into the event
+ * @link_id: the link ID for MLO, must be 0 for non-MLO
+ * @gfp: allocation flags
+ *
+ * Queue the channel switch on the same per-interface event list as connection,
+ * roaming and disconnection notifications. The channel is updated and userspace
+ * notified under the wiphy mutex after preceding events have been processed.
+ * Events for an unregistered, stopped or disconnected interface, or a removed
+ * link, are discarded. Drivers must cancel pending notifications before reusing
+ * an interface or link for a different BSS.
+ *
+ * The driver must serialize event production against interface unregister, as
+ * for other asynchronous cfg80211 connection notifications. The channel in
+ * @chandef must belong to the device's wiphy and remain valid until unregister.
+ *
+ * Context: Any context, according to @gfp. Does not require the wiphy mutex.
+ * Return: 0 on success, -EINVAL for invalid arguments, or -ENOMEM.
+ */
+int cfg80211_ch_switch_notify_queued(struct net_device *dev,
+				     const struct cfg80211_chan_def *chandef,
+				     unsigned int link_id, gfp_t gfp);
+
+/**
+ * cfg80211_ch_switch_notify_cancel - cancel pending channel switch notifications
+ * @wdev: the wireless interface
+ * @link_id: link to cancel, or -1 for all links
+ *
+ * Remove only pending channel switch events, preserving the order of connection
+ * and other notifications. Call before replacing an interface or link's BSS.
+ * This does not wait for a notification already being processed. Hold the wiphy
+ * mutex when cancellation must also exclude an in-progress notification.
+ *
+ * Context: Any context. The driver must keep @wdev alive for the call.
+ */
+void cfg80211_ch_switch_notify_cancel(struct wireless_dev *wdev, int link_id);
+
+/**
  * cfg80211_ch_switch_started_notify - notify channel switch start
  * @dev: the device on which the channel switch started
  * @chandef: the future channel definition

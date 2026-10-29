@@ -22185,6 +22185,53 @@ void cfg80211_ch_switch_notify(struct net_device *dev,
 }
 EXPORT_SYMBOL(cfg80211_ch_switch_notify);
 
+int cfg80211_ch_switch_notify_queued(struct net_device *dev,
+				     const struct cfg80211_chan_def *chandef,
+				     unsigned int link_id, gfp_t gfp)
+{
+	struct wireless_dev *wdev = dev->ieee80211_ptr;
+	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
+	struct cfg80211_event *ev;
+	unsigned long flags;
+
+	if (link_id >= ARRAY_SIZE(wdev->links) || !chandef->chan)
+		return -EINVAL;
+
+	ev = kzalloc(sizeof(*ev), gfp);
+	if (!ev)
+		return -ENOMEM;
+
+	ev->type = EVENT_CH_SWITCH;
+	ev->cs.chandef = *chandef;
+	ev->cs.iftype = READ_ONCE(wdev->iftype);
+	ev->link_id = link_id;
+
+	/* Keep pending connect/roam results ahead of their channel update. */
+	spin_lock_irqsave(&wdev->event_lock, flags);
+	list_add_tail(&ev->list, &wdev->event_list);
+	spin_unlock_irqrestore(&wdev->event_lock, flags);
+	queue_work(cfg80211_wq, &rdev->event_work);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(cfg80211_ch_switch_notify_queued);
+
+void cfg80211_ch_switch_notify_cancel(struct wireless_dev *wdev, int link_id)
+{
+	struct cfg80211_event *ev, *next;
+	unsigned long flags;
+
+	spin_lock_irqsave(&wdev->event_lock, flags);
+	list_for_each_entry_safe(ev, next, &wdev->event_list, list) {
+		if (ev->type != EVENT_CH_SWITCH ||
+		    (link_id >= 0 && ev->link_id != link_id))
+			continue;
+		list_del(&ev->list);
+		kfree(ev);
+	}
+	spin_unlock_irqrestore(&wdev->event_lock, flags);
+}
+EXPORT_SYMBOL_GPL(cfg80211_ch_switch_notify_cancel);
+
 void cfg80211_incumbent_signal_notify(struct wiphy *wiphy,
 				      const struct cfg80211_chan_def *chandef,
 				      u32 signal_interference_bitmap,

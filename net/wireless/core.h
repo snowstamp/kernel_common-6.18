@@ -264,6 +264,7 @@ enum cfg80211_event_type {
 	EVENT_IBSS_JOINED,
 	EVENT_STOPPED,
 	EVENT_PORT_AUTHORIZED,
+	EVENT_CH_SWITCH,
 };
 
 struct cfg80211_event {
@@ -273,6 +274,10 @@ struct cfg80211_event {
 	union {
 		struct cfg80211_connect_resp_params cr;
 		struct cfg80211_roam_info rm;
+		struct {
+			struct cfg80211_chan_def chandef;
+			enum nl80211_iftype iftype;
+		} cs;
 		struct {
 			const u8 *ie;
 			size_t ie_len;
