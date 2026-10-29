@@ -19078,6 +19078,42 @@ static u32 nl80211_internal_flags[] = {
 #undef SELECTOR
 };
 
+/* Preserve the two existing user pointers at the start of the family context. */
+struct nl80211_doit_context {
+	void *user_ptr[2];
+	bool need_rtnl;
+};
+
+static struct nl80211_doit_context *nl80211_doit_context(struct genl_info *info)
+{
+	BUILD_BUG_ON(sizeof(struct nl80211_doit_context) > sizeof(info->ctx));
+	return (void *)info->ctx;
+}
+
+static bool nl80211_vendor_cmd_needs_rtnl(struct cfg80211_registered_device *rdev,
+					  struct genl_info *info)
+{
+	u32 vendor_id, subcmd;
+	unsigned int i;
+
+	ASSERT_RTNL();
+	lockdep_assert_held(&rdev->wiphy.mtx);
+	if (!rdev->wiphy.vendor_commands ||
+	    !info->attrs[NL80211_ATTR_VENDOR_ID] ||
+	    !info->attrs[NL80211_ATTR_VENDOR_SUBCMD])
+		return false;
+
+	vendor_id = nla_get_u32(info->attrs[NL80211_ATTR_VENDOR_ID]);
+	subcmd = nla_get_u32(info->attrs[NL80211_ATTR_VENDOR_SUBCMD]);
+	for (i = 0; i < rdev->wiphy.n_vendor_commands; i++) {
+		const struct wiphy_vendor_command *vcmd = &rdev->wiphy.vendor_commands[i];
+
+		if (vcmd->info.vendor_id == vendor_id && vcmd->info.subcmd == subcmd)
+			return vcmd->doit && (vcmd->flags & WIPHY_VENDOR_CMD_NEED_RTNL);
+	}
+	return false;
+}
+
 static int nl80211_pre_doit(const struct genl_split_ops *ops,
 			    struct sk_buff *skb,
 			    struct genl_info *info)
@@ -19085,6 +19121,7 @@ static int nl80211_pre_doit(const struct genl_split_ops *ops,
 	struct cfg80211_registered_device *rdev = NULL;
 	struct wireless_dev *wdev = NULL;
 	struct net_device *dev = NULL;
+	struct nl80211_doit_context *ctx = nl80211_doit_context(info);
 	u32 internal_flags;
 	int err;
 
@@ -19092,6 +19129,7 @@ static int nl80211_pre_doit(const struct genl_split_ops *ops,
 		return -EINVAL;
 
 	internal_flags = nl80211_internal_flags[ops->internal_flags];
+	ctx->need_rtnl = internal_flags & NL80211_FLAG_NEED_RTNL;
 
 	rtnl_lock();
 	if (internal_flags & NL80211_FLAG_NEED_WIPHY) {
@@ -19167,10 +19205,20 @@ static int nl80211_pre_doit(const struct genl_split_ops *ops,
 
 	if (rdev && !(internal_flags & NL80211_FLAG_NO_WIPHY_MTX)) {
 		wiphy_lock(&rdev->wiphy);
+		if (ops->cmd == NL80211_CMD_VENDOR)
+			ctx->need_rtnl |= nl80211_vendor_cmd_needs_rtnl(rdev, info);
+		if (rdev->wiphy.flags & WIPHY_FLAG_DISCOVERY_NEEDS_RTNL) {
+			switch (ops->cmd) {
+			case NL80211_CMD_TRIGGER_SCAN:
+			case NL80211_CMD_REMAIN_ON_CHANNEL:
+				ctx->need_rtnl = true;
+				break;
+			}
+		}
 		/* we keep the mutex locked until post_doit */
 		__release(&rdev->wiphy.mtx);
 	}
-	if (!(internal_flags & NL80211_FLAG_NEED_RTNL))
+	if (!ctx->need_rtnl)
 		rtnl_unlock();
 
 	return 0;
@@ -19185,6 +19233,8 @@ static void nl80211_post_doit(const struct genl_split_ops *ops,
 			      struct genl_info *info)
 {
 	u32 internal_flags = nl80211_internal_flags[ops->internal_flags];
+	/* Use the actual acquisition decision, never re-read a driver table. */
+	bool need_rtnl = nl80211_doit_context(info)->need_rtnl;
 
 	if (info->user_ptr[1]) {
 		if (internal_flags & NL80211_FLAG_NEED_WDEV) {
@@ -19205,7 +19255,7 @@ static void nl80211_post_doit(const struct genl_split_ops *ops,
 		wiphy_unlock(&rdev->wiphy);
 	}
 
-	if (internal_flags & NL80211_FLAG_NEED_RTNL)
+	if (need_rtnl)
 		rtnl_unlock();
 
 	/* If needed, clear the netlink message payload from the SKB

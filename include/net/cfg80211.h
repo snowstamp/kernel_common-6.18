@@ -5674,6 +5674,11 @@ struct cfg80211_ops {
  * @WIPHY_FLAG_SUPPORTS_NSTR_NONPRIMARY: support connection to non-primary link
  *	of an NSTR mobile AP MLD.
  * @WIPHY_FLAG_DISABLE_WEXT: disable wireless extensions for this device
+ * @WIPHY_FLAG_DISCOVERY_NEEDS_RTNL: retain RTNL across nl80211 trigger-scan
+ *	and remain-on-channel requests, acquired before the wiphy mutex, for a
+ *	driver whose synchronous discovery concurrency policy changes network
+ *	interfaces. Set before wiphy registration and keep immutable afterward.
+ *	Callbacks must return with both locks held. Other commands are unaffected.
  */
 enum wiphy_flags {
 	WIPHY_FLAG_SUPPORTS_EXT_KEK_KCK		= BIT(0),
@@ -5702,6 +5707,7 @@ enum wiphy_flags {
 	WIPHY_FLAG_HAS_CHANNEL_SWITCH		= BIT(23),
 	WIPHY_FLAG_NOTIFY_REGDOM_BY_DRIVER	= BIT(24),
 	WIPHY_FLAG_CHANNEL_CHANGE_ON_BEACON     = BIT(25),
+	WIPHY_FLAG_DISCOVERY_NEEDS_RTNL		= BIT(26),
 };
 
 /**
@@ -5924,11 +5930,16 @@ struct wiphy_coalesce_support {
  * @WIPHY_VENDOR_CMD_NEED_NETDEV: vendor command requires netdev
  * @WIPHY_VENDOR_CMD_NEED_RUNNING: interface/wdev must be up & running
  *	(must be combined with %_WDEV or %_NETDEV)
+ * @WIPHY_VENDOR_CMD_NEED_RTNL: retain RTNL across the doit callback, acquired
+ *	before the wiphy mutex, for commands which change network interfaces.
+ *	The callback must return with both locks held. This flag does not affect
+ *	dump callbacks. Published vendor command tables must remain immutable.
  */
 enum wiphy_vendor_command_flags {
 	WIPHY_VENDOR_CMD_NEED_WDEV = BIT(0),
 	WIPHY_VENDOR_CMD_NEED_NETDEV = BIT(1),
 	WIPHY_VENDOR_CMD_NEED_RUNNING = BIT(2),
+	WIPHY_VENDOR_CMD_NEED_RTNL = BIT(3),
 };
 
 /**
