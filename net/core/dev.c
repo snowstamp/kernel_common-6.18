@@ -6359,6 +6359,7 @@ void netif_receive_skb_list_internal(struct list_head *head)
 	__netif_receive_skb_list(head);
 	rcu_read_unlock();
 }
+EXPORT_SYMBOL_GPL(netif_receive_skb_list_internal);
 
 /**
  *	netif_receive_skb - process receive buffer from network
