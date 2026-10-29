@@ -135,6 +135,9 @@ struct fb_cursor_user {
 #define FB_EVENT_FB_UNREGISTERED        0x06
 #endif
 
+/* A display blank operation completed successfully. */
+#define FB_EVENT_BLANK                  0x09
+
 struct fb_event {
 	struct fb_info *info;
 	void *data;
