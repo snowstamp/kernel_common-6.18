@@ -11,6 +11,7 @@ typedef struct folio *new_folio_t(struct folio *folio, unsigned long private);
 typedef void free_folio_t(struct folio *folio, unsigned long private);
 
 struct migration_target_control;
+struct module;
 
 /**
  * struct movable_operations - Driver page migration
@@ -71,6 +72,9 @@ void folio_migrate_flags(struct folio *newfolio, struct folio *folio);
 int folio_migrate_mapping(struct address_space *mapping,
 		struct folio *newfolio, struct folio *folio, int extra_count);
 int set_movable_ops(const struct movable_operations *ops, enum pagetype type);
+int register_gpu_movable_ops(const struct movable_operations *ops,
+			     struct module *owner);
+int unregister_gpu_movable_ops(const struct movable_operations *ops);
 
 #else
 
@@ -93,6 +97,16 @@ static inline int migrate_huge_page_move_mapping(struct address_space *mapping,
 	return -ENOSYS;
 }
 static inline int set_movable_ops(const struct movable_operations *ops, enum pagetype type)
+{
+	return -ENOSYS;
+}
+
+static inline int register_gpu_movable_ops(const struct movable_operations *ops,
+					    struct module *owner)
+{
+	return -ENOSYS;
+}
+static inline int unregister_gpu_movable_ops(const struct movable_operations *ops)
 {
 	return -ENOSYS;
 }

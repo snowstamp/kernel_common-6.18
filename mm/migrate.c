@@ -43,6 +43,11 @@
 #include <linux/sched/sysctl.h>
 #include <linux/memory-tiers.h>
 #include <linux/pagewalk.h>
+#include <linux/module.h>
+#include <linux/slab.h>
+#include <linux/srcu.h>
+#include <linux/mutex.h>
+#include <linux/wait.h>
 
 #include <asm/tlbflush.h>
 
@@ -57,6 +62,183 @@
 
 static const struct movable_operations *offline_movable_ops;
 static const struct movable_operations *zsmalloc_movable_ops;
+
+/*
+ * GPU pages keep their type and PG_movable_ops until they reach the buddy.
+ * Permanent adapters reject isolation of retired pages after a provider has
+ * gone away. A successful isolation pins the provider until success/putback.
+ */
+struct gpu_movable_provider {
+	const struct movable_operations *ops;
+	struct module *owner;
+	atomic_t isolated;
+	wait_queue_head_t wait;
+	bool accepting;
+};
+
+static DEFINE_MUTEX(gpu_movable_lock);
+DEFINE_STATIC_SRCU(gpu_movable_srcu);
+static struct gpu_movable_provider __rcu *gpu_movable_provider;
+
+/**
+ * register_gpu_movable_ops - register the GPU page migration provider
+ * @ops: permanent isolate/migrate/putback callbacks
+ * @owner: module containing @ops, or NULL for built-in callbacks
+ *
+ * Only one provider may be registered. The provider must initialize page
+ * metadata before setting PageGpu and PG_movable_ops under the page lock.
+ * Both flags remain sticky until the page allocator frees the page; driver
+ * metadata determines whether an owned page is currently eligible to move.
+ *
+ * The core pins @owner across each successful isolation until migration
+ * succeeds or putback completes. A failed migration retains this reference.
+ * The driver must independently keep per-device state alive throughout the
+ * transaction and drain its pages before unregistering. Registration and
+ * unregistration may sleep and must not be called from a callback.
+ *
+ * Return: zero on success, -EBUSY if occupied, or another negative errno.
+ */
+int register_gpu_movable_ops(const struct movable_operations *ops,
+			     struct module *owner)
+{
+	struct gpu_movable_provider *provider;
+	int ret = 0;
+
+	if (!ops || !ops->isolate_page || !ops->migrate_page ||
+	    !ops->putback_page)
+		return -EINVAL;
+
+	provider = kzalloc(sizeof(*provider), GFP_KERNEL);
+	if (!provider)
+		return -ENOMEM;
+
+	provider->ops = ops;
+	provider->owner = owner;
+	provider->accepting = true;
+	atomic_set(&provider->isolated, 0);
+	init_waitqueue_head(&provider->wait);
+
+	mutex_lock(&gpu_movable_lock);
+	if (rcu_access_pointer(gpu_movable_provider))
+		ret = -EBUSY;
+	else
+		rcu_assign_pointer(gpu_movable_provider, provider);
+	mutex_unlock(&gpu_movable_lock);
+
+	if (ret)
+		kfree(provider);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(register_gpu_movable_ops);
+
+/**
+ * unregister_gpu_movable_ops - stop and drain a GPU migration provider
+ * @ops: the exact callbacks previously registered
+ *
+ * Close isolation admission, wait for running isolation callbacks and all
+ * accepted transactions, then remove the provider and wait for readers.
+ * The caller must drain owned pages before this call; retired typed pages
+ * with cleared driver metadata may still be seen by lockless compaction.
+ * May sleep. Do not call from a migration callback or hold a lock it needs.
+ *
+ * Return: zero on success, -EINVAL if @ops does not identify the provider.
+ */
+int unregister_gpu_movable_ops(const struct movable_operations *ops)
+{
+	struct gpu_movable_provider *provider;
+
+	mutex_lock(&gpu_movable_lock);
+	provider = rcu_dereference_protected(gpu_movable_provider,
+					   lockdep_is_held(&gpu_movable_lock));
+	if (!provider || provider->ops != ops) {
+		mutex_unlock(&gpu_movable_lock);
+		return -EINVAL;
+	}
+
+	WRITE_ONCE(provider->accepting, false);
+	/* Every admitted isolate must publish its transaction count first. */
+	synchronize_srcu(&gpu_movable_srcu);
+	wait_event(provider->wait, !atomic_read(&provider->isolated));
+
+	rcu_assign_pointer(gpu_movable_provider, NULL);
+	synchronize_srcu(&gpu_movable_srcu);
+	mutex_unlock(&gpu_movable_lock);
+	kfree(provider);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(unregister_gpu_movable_ops);
+
+static bool gpu_movable_isolate_page(struct page *page, isolate_mode_t mode)
+{
+	struct gpu_movable_provider *provider;
+	bool isolated = false;
+	int idx;
+
+	idx = srcu_read_lock(&gpu_movable_srcu);
+	provider = srcu_dereference(gpu_movable_provider, &gpu_movable_srcu);
+	if (!provider || !READ_ONCE(provider->accepting) ||
+	    !try_module_get(provider->owner))
+		goto out;
+
+	isolated = provider->ops->isolate_page(page, mode);
+	if (isolated)
+		atomic_inc(&provider->isolated);
+	else
+		module_put(provider->owner);
+out:
+	srcu_read_unlock(&gpu_movable_srcu, idx);
+	return isolated;
+}
+
+static void gpu_movable_complete(struct gpu_movable_provider *provider)
+{
+	if (atomic_dec_and_test(&provider->isolated))
+		wake_up_all(&provider->wait);
+	module_put(provider->owner);
+}
+
+static int gpu_movable_migrate_page(struct page *dst, struct page *src,
+				    enum migrate_mode mode)
+{
+	struct gpu_movable_provider *provider;
+	int idx, ret = -EINVAL;
+
+	idx = srcu_read_lock(&gpu_movable_srcu);
+	provider = srcu_dereference(gpu_movable_provider, &gpu_movable_srcu);
+	/* A successful isolation retains the provider and its module pin. */
+	if (WARN_ON_ONCE(!provider || !atomic_read(&provider->isolated)))
+		goto out;
+
+	ret = provider->ops->migrate_page(dst, src, mode);
+	if (!ret)
+		gpu_movable_complete(provider);
+out:
+	srcu_read_unlock(&gpu_movable_srcu, idx);
+	return ret;
+}
+
+static void gpu_movable_putback_page(struct page *page)
+{
+	struct gpu_movable_provider *provider;
+	int idx;
+
+	idx = srcu_read_lock(&gpu_movable_srcu);
+	provider = srcu_dereference(gpu_movable_provider, &gpu_movable_srcu);
+	if (WARN_ON_ONCE(!provider || !atomic_read(&provider->isolated)))
+		goto out;
+
+	provider->ops->putback_page(page);
+	gpu_movable_complete(provider);
+out:
+	srcu_read_unlock(&gpu_movable_srcu, idx);
+}
+
+static const struct movable_operations gpu_movable_ops = {
+	.isolate_page = gpu_movable_isolate_page,
+	.migrate_page = gpu_movable_migrate_page,
+	.putback_page = gpu_movable_putback_page,
+};
+
 
 int set_movable_ops(const struct movable_operations *ops, enum pagetype type)
 {
@@ -96,6 +278,8 @@ static const struct movable_operations *page_movable_ops(struct page *page)
 		return offline_movable_ops;
 	if (PageZsmalloc(page))
 		return zsmalloc_movable_ops;
+	if (PageGpu(page))
+		return &gpu_movable_ops;
 
 	return NULL;
 }

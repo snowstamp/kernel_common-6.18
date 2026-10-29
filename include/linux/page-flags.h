@@ -945,6 +945,7 @@ enum pagetype {
 	PGTY_zsmalloc		= 0xf6,
 	PGTY_unaccepted		= 0xf7,
 	PGTY_large_kmalloc	= 0xf8,
+	PGTY_gpu		= 0xf9,
 
 	PGTY_mapcount_underflow = 0xff
 };
@@ -1053,6 +1054,9 @@ extern void page_offline_end(void);
  * Marks pages in use as page tables.
  */
 PAGE_TYPE_OPS(Table, table, pgtable)
+
+/* Driver-owned GPU pages; the type stays sticky until buddy free. */
+PAGE_TYPE_OPS(Gpu, gpu, gpu)
 
 /*
  * Marks guardpages used with debug_pagealloc.
@@ -1170,7 +1174,7 @@ PAGEFLAG_FALSE(MovableOpsIsolated, movable_ops_isolated);
 static inline bool page_has_movable_ops(const struct page *page)
 {
 	return PageMovableOps(page) &&
-	       (PageOffline(page) || PageZsmalloc(page));
+	       (PageOffline(page) || PageZsmalloc(page) || PageGpu(page));
 }
 
 static __always_inline int PageAnonExclusive(const struct page *page)

@@ -54,6 +54,7 @@ static const char *page_type_names[] = {
 	DEF_PAGETYPE_NAME(offline),
 	DEF_PAGETYPE_NAME(guard),
 	DEF_PAGETYPE_NAME(table),
+	DEF_PAGETYPE_NAME(gpu),
 	DEF_PAGETYPE_NAME(buddy),
 	DEF_PAGETYPE_NAME(unaccepted),
 };
