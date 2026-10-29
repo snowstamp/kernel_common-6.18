@@ -11897,6 +11897,25 @@ void netdev_set_default_ethtool_ops(struct net_device *dev,
 EXPORT_SYMBOL_GPL(netdev_set_default_ethtool_ops);
 
 /**
+ * netdev_update_gro_flush_timeout - update GRO timeout for all device NAPIs
+ * @dev: network device whose GRO timeout is being updated
+ * @timeout: GRO flush timeout in nanoseconds
+ *
+ * Update the device default, active NAPIs and persistent NAPI configuration
+ * through the same operation used by the gro_flush_timeout sysfs attribute.
+ *
+ * Context: Process context. Takes the device lock and may sleep. The caller
+ * must keep @dev alive and must not hold its device lock.
+ */
+void netdev_update_gro_flush_timeout(struct net_device *dev, unsigned long timeout)
+{
+	netdev_lock(dev);
+	netdev_set_gro_flush_timeout(dev, timeout);
+	netdev_unlock(dev);
+}
+EXPORT_SYMBOL_GPL(netdev_update_gro_flush_timeout);
+
+/**
  * netdev_sw_irq_coalesce_default_on() - enable SW IRQ coalescing by default
  * @dev: netdev to enable the IRQ coalescing on
  *

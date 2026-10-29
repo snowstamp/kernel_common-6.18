@@ -91,6 +91,8 @@ typedef u32 xdp_features_t;
 void synchronize_net(void);
 void netdev_set_default_ethtool_ops(struct net_device *dev,
 				    const struct ethtool_ops *ops);
+/* May sleep; caller keeps the device alive and must not hold netdev_lock(). */
+void netdev_update_gro_flush_timeout(struct net_device *dev, unsigned long timeout);
 void netdev_sw_irq_coalesce_default_on(struct net_device *dev);
 
 /* Backlog congestion levels */
