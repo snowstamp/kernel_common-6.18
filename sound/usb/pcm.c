@@ -1245,6 +1245,7 @@ static int snd_usb_pcm_open(struct snd_pcm_substream *substream)
 		if (subs->opened)
 			return -EBUSY;
 		subs->opened = 1;
+		subs->runtime_pm_held = false;
 	}
 
 	runtime->hw = snd_usb_hardware;
@@ -1271,6 +1272,14 @@ static int snd_usb_pcm_open(struct snd_pcm_substream *substream)
 	if (ret < 0)
 		goto err_resume;
 
+	/* Snapshot policy once: a later provider change must not alter close. */
+	scoped_guard(mutex, &chip->mutex) {
+		subs->runtime_pm_held =
+			!(chip->quirk_flags & QUIRK_FLAG_PCM_ALLOW_RUNTIME_SUSPEND);
+	}
+	if (!subs->runtime_pm_held)
+		snd_usb_autosuspend(chip);
+
 	return 0;
 
 err_resume:
@@ -1294,21 +1303,23 @@ static int snd_usb_pcm_close(struct snd_pcm_substream *substream)
 	snd_media_stop_pipeline(subs);
 
 	{
-		CLASS(snd_usb_lock, pm)(subs->stream->chip);
-		if (pm.err)
-			return pm.err;
-		ret = snd_usb_pcm_change_state(subs, UAC3_PD_STATE_D1);
-		if (ret < 0)
-			return ret;
+		/* This temporary vote also resumes an offloaded, suspended stream. */
+		CLASS(snd_usb_lock, pm)(chip);
+		ret = pm.err;
+		if (!ret)
+			ret = snd_usb_pcm_change_state(subs, UAC3_PD_STATE_D1);
 	}
 
 	subs->pcm_substream = NULL;
-	snd_usb_autosuspend(subs->stream->chip);
+	if (subs->runtime_pm_held) {
+		snd_usb_autosuspend(chip);
+		subs->runtime_pm_held = false;
+	}
 	scoped_guard(mutex, &chip->mutex) {
 		subs->opened = 0;
 	}
 
-	return 0;
+	return ret;
 }
 
 /* Since a URB can handle only a single linear buffer, we must use double
