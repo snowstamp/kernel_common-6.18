@@ -276,9 +276,6 @@ void drm_plane_unregister_all(struct drm_device *dev);
 struct drm_mode_rect *
 __drm_plane_get_damage_clips(const struct drm_plane_state *state);
 
-/* drm_bridge.c */
-void drm_bridge_detach(struct drm_bridge *bridge);
-
 /* IOCTL */
 int drm_mode_getplane_res(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv);

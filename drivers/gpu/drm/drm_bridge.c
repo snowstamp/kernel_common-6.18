@@ -484,6 +484,23 @@ err_put_bridge:
 }
 EXPORT_SYMBOL(drm_bridge_attach);
 
+/**
+ * drm_bridge_detach - detach an attached bridge from its encoder
+ * @bridge: bridge to detach
+ *
+ * Unlinks the bridge and releases the reference acquired by
+ * drm_bridge_attach(). The bridge must still have another reference keeping it
+ * alive. This function does not remove the bridge from the global bridge list
+ * or release its allocation/registration references.
+ *
+ * The caller must serialize encoder topology changes and ensure bridge
+ * callbacks no longer use resources being torn down. This function acquires no
+ * modeset locks and does not quiesce display commits. A driver removing a
+ * registered bridge should first call drm_bridge_remove() to stop new lookup,
+ * then detach under its KMS topology serialization before releasing resources.
+ * Normally encoder cleanup detaches bridges automatically; drivers need an
+ * explicit detach only when their bridge disappears before encoder cleanup.
+ */
 void drm_bridge_detach(struct drm_bridge *bridge)
 {
 	if (WARN_ON(!bridge))
@@ -502,6 +519,7 @@ void drm_bridge_detach(struct drm_bridge *bridge)
 	bridge->dev = NULL;
 	drm_bridge_put(bridge);
 }
+EXPORT_SYMBOL_GPL(drm_bridge_detach);
 
 /**
  * DOC: bridge operations
