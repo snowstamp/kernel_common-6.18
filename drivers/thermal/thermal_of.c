@@ -394,6 +394,11 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
 	if (!trips)
 		pr_info("No trip points found for %pOFn id=%d\n", sensor, id);
 
+	/* Preserve writable OF trip metadata for providers opting in. */
+	if (ops->writable_hysteresis)
+		for (int i = 0; i < ntrips; i++)
+			trips[i].flags |= THERMAL_TRIP_FLAG_RW_HYST;
+
 	ret = thermal_of_monitor_init(np, &delay, &pdelay);
 	if (ret) {
 		pr_err("Failed to initialize monitoring delays from %pOFn\n", np);

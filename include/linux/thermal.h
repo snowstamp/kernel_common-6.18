@@ -104,6 +104,11 @@ struct thermal_zone_device_ops {
 		enum thermal_device_mode);
 	int (*set_trip_temp) (struct thermal_zone_device *,
 			      const struct thermal_trip *, int);
+	/*
+	 * Allow OF trip metadata writes for providers opting in.
+	 * Native trip/window updates still run; this flag programs no hardware.
+	 */
+	bool writable_hysteresis;
 	int (*get_crit_temp) (struct thermal_zone_device *, int *);
 	int (*set_emul_temp) (struct thermal_zone_device *, int);
 	int (*get_trend) (struct thermal_zone_device *,
