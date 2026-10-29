@@ -52,6 +52,7 @@
  *   endpoint rings; it generates events on the event ring for these.
  */
 
+#include <linux/export.h>
 #include <linux/jiffies.h>
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
@@ -337,9 +338,12 @@ static struct xhci_segment *trb_in_td(struct xhci_td *td, dma_addr_t suspect_dma
  * Return number of free normal TRBs from enqueue to dequeue pointer on ring.
  * Not counting an assumed link TRB at end of each TRBS_PER_SEGMENT sized segment.
  * Only for transfer and command rings where driver is the producer, not for
- * event rings.
+ * event rings. Caller must hold the controller's xhci->lock to serialize ring
+ * cursor and segment updates, and separately keep the ring alive and prevent
+ * endpoint reconfiguration. The count includes the spare normal TRB that a
+ * producer must leave unused to distinguish a full ring from an empty one.
  */
-static unsigned int xhci_num_trbs_free(struct xhci_ring *ring)
+unsigned int xhci_num_trbs_free(struct xhci_ring *ring)
 {
 	struct xhci_segment *enq_seg = ring->enq_seg;
 	union xhci_trb *enq = ring->enqueue;
@@ -368,6 +372,7 @@ static unsigned int xhci_num_trbs_free(struct xhci_ring *ring)
 
 	return free;
 }
+EXPORT_SYMBOL_GPL(xhci_num_trbs_free);
 
 /*
  * Check to see if there's room to enqueue num_trbs on the ring and make sure
