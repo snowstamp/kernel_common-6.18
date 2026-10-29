@@ -281,6 +281,24 @@ bool thermal_trip_is_bound_to_cdev(struct thermal_zone_device *tz,
 				   const struct thermal_trip *trip,
 				   struct thermal_cooling_device *cdev);
 
+/*
+ * The callback runs with the zone lock held. Binding, trip and cooling device
+ * pointers are borrowed for the duration of the callback; do not retain them or
+ * call interfaces which acquire the same zone lock recursively. The binding
+ * accessors and setters below may only be used from this callback.
+ */
+int thermal_zone_for_each_cooling_binding(struct thermal_zone_device *tz,
+	int (*cb)(struct thermal_zone_device *, struct thermal_instance *, void *),
+	void *data);
+struct thermal_cooling_device *thermal_instance_cdev(const struct thermal_instance *instance);
+int thermal_instance_trip_id(struct thermal_zone_device *tz,
+			     const struct thermal_instance *instance);
+int thermal_instance_set_upper(struct thermal_zone_device *tz,
+			       struct thermal_instance *instance, unsigned long upper);
+/* Custom controllers may override governor binding limits, never hardware limits. */
+int thermal_instance_override_target(struct thermal_zone_device *tz,
+				struct thermal_instance *instance, unsigned long target);
+
 int thermal_zone_device_enable(struct thermal_zone_device *tz);
 int thermal_zone_device_disable(struct thermal_zone_device *tz);
 void thermal_zone_device_critical(struct thermal_zone_device *tz);

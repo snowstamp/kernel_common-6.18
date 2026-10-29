@@ -982,6 +982,79 @@ static void thermal_release(struct device *dev)
 
 static struct class *thermal_class;
 
+int thermal_zone_for_each_cooling_binding(struct thermal_zone_device *tz,
+	int (*cb)(struct thermal_zone_device *, struct thermal_instance *, void *),
+	void *data)
+{
+	struct thermal_trip_desc *td;
+	struct thermal_instance *instance;
+	int ret;
+
+	guard(thermal_zone)(tz);
+
+	for_each_trip_desc(tz, td) {
+		list_for_each_entry(instance, &td->thermal_instances, trip_node) {
+			ret = cb(tz, instance, data);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(thermal_zone_for_each_cooling_binding);
+
+struct thermal_cooling_device *thermal_instance_cdev(const struct thermal_instance *instance)
+{
+	return instance->cdev;
+}
+EXPORT_SYMBOL_GPL(thermal_instance_cdev);
+
+int thermal_instance_trip_id(struct thermal_zone_device *tz,
+			     const struct thermal_instance *instance)
+{
+	lockdep_assert_held(&tz->lock);
+
+	return thermal_zone_trip_id(tz, instance->trip);
+}
+EXPORT_SYMBOL_GPL(thermal_instance_trip_id);
+
+int thermal_instance_override_target(struct thermal_zone_device *tz,
+				struct thermal_instance *instance, unsigned long target)
+{
+	struct thermal_cooling_device *cdev = instance->cdev;
+
+	lockdep_assert_held(&tz->lock);
+	guard(cooling_dev)(cdev);
+
+	if (target != THERMAL_NO_TARGET && target > cdev->max_state)
+		return -EINVAL;
+
+	instance->target = target;
+	__thermal_cdev_update(cdev);
+	cdev->updated = true;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(thermal_instance_override_target);
+
+int thermal_instance_set_upper(struct thermal_zone_device *tz,
+			       struct thermal_instance *instance, unsigned long upper)
+{
+	struct thermal_cooling_device *cdev = instance->cdev;
+	lockdep_assert_held(&tz->lock);
+	guard(cooling_dev)(cdev);
+
+	if (upper < instance->lower || upper > cdev->max_state)
+		return -EINVAL;
+
+	instance->upper = upper;
+	instance->upper_no_limit = false;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(thermal_instance_set_upper);
+
 static inline
 void print_bind_err_msg(struct thermal_zone_device *tz,
 			const struct thermal_trip_desc *td,
@@ -1292,6 +1365,10 @@ void thermal_cooling_device_update(struct thermal_cooling_device *cdev)
 	thermal_cooling_device_stats_reinit(cdev);
 
 	list_for_each_entry(ti, &cdev->thermal_instances, cdev_node) {
+		/* Custom controller targets may exceed the governor upper limit. */
+		if (ti->target != THERMAL_NO_TARGET && ti->target > cdev->max_state)
+			ti->target = cdev->max_state;
+
 		if (ti->upper == cdev->max_state)
 			continue;
 
