@@ -29,6 +29,7 @@
 #include <linux/usb.h>
 #include <linux/moduleparam.h>
 #include <linux/mutex.h>
+#include <linux/srcu.h>
 #include <linux/usb/audio.h>
 #include <linux/usb/audio-v2.h>
 #include <linux/usb/audio-v3.h>
@@ -137,7 +138,50 @@ MODULE_PARM_DESC(quirk_flags, "Add/modify USB audio quirks");
 static DEFINE_MUTEX(register_mutex);
 static struct snd_usb_audio *usb_chip[SNDRV_CARDS];
 static struct usb_driver usb_audio_driver;
-static struct snd_usb_platform_ops *platform_ops;
+/* Serialize replacement while a withdrawn provider's callbacks drain. */
+static DEFINE_MUTEX(platform_ops_mutex);
+DEFINE_STATIC_SRCU(platform_ops_srcu);
+static struct snd_usb_platform_ops __rcu *platform_ops;
+
+static void snd_usb_platform_connect(struct snd_usb_audio *chip)
+{
+	struct snd_usb_platform_ops *ops;
+
+	guard(srcu)(&platform_ops_srcu);
+	ops = srcu_dereference(platform_ops, &platform_ops_srcu);
+	if (ops && ops->connect_cb)
+		ops->connect_cb(chip);
+}
+
+static void snd_usb_platform_disconnect(struct snd_usb_audio *chip)
+{
+	struct snd_usb_platform_ops *ops;
+
+	guard(srcu)(&platform_ops_srcu);
+	ops = srcu_dereference(platform_ops, &platform_ops_srcu);
+	if (ops && ops->disconnect_cb)
+		ops->disconnect_cb(chip);
+}
+
+static void snd_usb_platform_suspend(struct usb_interface *intf, pm_message_t message)
+{
+	struct snd_usb_platform_ops *ops;
+
+	guard(srcu)(&platform_ops_srcu);
+	ops = srcu_dereference(platform_ops, &platform_ops_srcu);
+	if (ops && ops->suspend_cb)
+		ops->suspend_cb(intf, message);
+}
+
+static void snd_usb_platform_resume(struct usb_interface *intf)
+{
+	struct snd_usb_platform_ops *ops;
+
+	guard(srcu)(&platform_ops_srcu);
+	ops = srcu_dereference(platform_ops, &platform_ops_srcu);
+	if (ops && ops->resume_cb)
+		ops->resume_cb(intf);
+}
 
 /*
  * Register platform specific operations that will be notified on events
@@ -145,16 +189,23 @@ static struct snd_usb_platform_ops *platform_ops;
  * enable features, such as USB audio offloading, which allows for audio data
  * to be queued by an audio DSP.
  *
- * Only one set of platform operations can be registered to USB SND.  The
- * platform register operation is protected by the register_mutex.
+ * Only one set of platform operations can be registered to USB SND. The
+ * provider must keep its operations and callback storage alive until
+ * snd_usb_unregister_platform_ops() returns. Callbacks may sleep.
+ *
+ * Registration and unregistration must not be called from these callbacks or
+ * while holding a lock that they acquire. The register_mutex serializes
+ * publication with USB connect, disconnect and rediscovery callbacks; SRCU
+ * also protects callbacks from USB PM paths that cannot take register_mutex.
  */
 int snd_usb_register_platform_ops(struct snd_usb_platform_ops *ops)
 {
+	guard(mutex)(&platform_ops_mutex);
 	guard(mutex)(&register_mutex);
-	if (platform_ops)
+	if (rcu_access_pointer(platform_ops))
 		return -EEXIST;
 
-	platform_ops = ops;
+	rcu_assign_pointer(platform_ops, ops);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(snd_usb_register_platform_ops);
@@ -163,12 +214,17 @@ EXPORT_SYMBOL_GPL(snd_usb_register_platform_ops);
  * Unregisters the current set of platform operations.  This allows for
  * a new set to be registered if required.
  *
- * The platform unregister operation is protected by the register_mutex.
+ * Withdraw the provider under register_mutex, then wait without that mutex:
+ * disconnect can hold it while waiting for a usage_count owner whose USB PM
+ * callback must finish before it can drop that reference. Serialize replacement
+ * until all old callbacks have returned.
  */
 int snd_usb_unregister_platform_ops(void)
 {
-	guard(mutex)(&register_mutex);
-	platform_ops = NULL;
+	guard(mutex)(&platform_ops_mutex);
+	scoped_guard(mutex, &register_mutex)
+		rcu_assign_pointer(platform_ops, NULL);
+	synchronize_srcu(&platform_ops_srcu);
 
 	return 0;
 }
@@ -185,12 +241,9 @@ void snd_usb_rediscover_devices(void)
 
 	guard(mutex)(&register_mutex);
 
-	if (!platform_ops || !platform_ops->connect_cb)
-		return;
-
 	for (i = 0; i < SNDRV_CARDS; i++) {
 		if (usb_chip[i])
-			platform_ops->connect_cb(usb_chip[i]);
+			snd_usb_platform_connect(usb_chip[i]);
 	}
 }
 EXPORT_SYMBOL_GPL(snd_usb_rediscover_devices);
@@ -1060,8 +1113,7 @@ static int usb_audio_probe(struct usb_interface *intf,
 	usb_set_intfdata(intf, chip);
 	atomic_dec(&chip->active);
 
-	if (platform_ops && platform_ops->connect_cb)
-		platform_ops->connect_cb(chip);
+	snd_usb_platform_connect(chip);
 
 	return 0;
 
@@ -1094,8 +1146,7 @@ static bool __usb_audio_disconnect(struct usb_interface *intf,
 
 	guard(mutex)(&register_mutex);
 
-	if (platform_ops && platform_ops->disconnect_cb)
-		platform_ops->disconnect_cb(chip);
+	snd_usb_platform_disconnect(chip);
 
 	if (atomic_inc_return(&chip->shutdown) == 1) {
 		struct snd_usb_stream *as;
@@ -1255,8 +1306,7 @@ static int usb_audio_suspend(struct usb_interface *intf, pm_message_t message)
 		chip->system_suspend = chip->num_suspended_intf;
 	}
 
-	if (platform_ops && platform_ops->suspend_cb)
-		platform_ops->suspend_cb(intf, message);
+	snd_usb_platform_suspend(intf, message);
 
 	return 0;
 }
@@ -1298,8 +1348,7 @@ static int usb_audio_resume(struct usb_interface *intf)
 
 	snd_usb_midi_v2_resume_all(chip);
 
-	if (platform_ops && platform_ops->resume_cb)
-		platform_ops->resume_cb(intf);
+	snd_usb_platform_resume(intf);
 
  out:
 	if (chip->num_suspended_intf == chip->system_suspend) {
