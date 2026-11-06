@@ -1562,6 +1562,7 @@
   loops_per_jiffy
   lru_cache_disable
   lru_disable_count
+  __lruvec_stat_mod_folio
   LZ4_compress_fast
   LZ4_compress_fast_continue
   LZ4_compress_HC
