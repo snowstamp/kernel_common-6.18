@@ -1263,6 +1263,7 @@
   ida_free
   idle_inject_get_duration
   idle_inject_register
+  idle_inject_unregister
   idr_alloc
   idr_alloc_u32
   idr_destroy
@@ -2614,6 +2615,7 @@
   __traceiter_android_rvh_update_load_sum
   __traceiter_android_rvh_update_rt_rq_load_avg
   __traceiter_android_rvh_util_fits_cpu
+  __traceiter_android_rvh_wake_up_new_task
   __traceiter_android_rvh_vmscan_kswapd_done
   __traceiter_android_rvh_vmscan_kswapd_wake
   __traceiter_android_trigger_vendor_lmk_kill
@@ -2718,6 +2720,7 @@
   __tracepoint_android_rvh_update_load_sum
   __tracepoint_android_rvh_update_rt_rq_load_avg
   __tracepoint_android_rvh_util_fits_cpu
+  __tracepoint_android_rvh_wake_up_new_task
   __tracepoint_android_rvh_vmscan_kswapd_done
   __tracepoint_android_rvh_vmscan_kswapd_wake
   __tracepoint_android_trigger_vendor_lmk_kill
