@@ -378,6 +378,9 @@ enum pd_apdo_type {
 #define PDO_PPS_APDO_VOLT_MASK	0xff
 #define PDO_PPS_APDO_CURR_MASK	0x7f
 
+/* Lowest operating voltage for a PPS supply, in mV. */
+#define PD_PPS_MIN_VOLT_MV	3300U
+
 #define PDO_PPS_APDO_MIN_VOLT(mv)	\
 	((((mv) / 100) & PDO_PPS_APDO_VOLT_MASK) << PDO_PPS_APDO_MIN_VOLT_SHIFT)
 #define PDO_PPS_APDO_MAX_VOLT(mv)	\

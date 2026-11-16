@@ -4488,7 +4488,8 @@ static int tcpm_pd_select_pdo(struct tcpm_port *port, int *sink_pdo,
 			break;
 		case PDO_TYPE_APDO:
 			if (pdo_apdo_type(pdo) == APDO_TYPE_PPS) {
-				port->pps_data.supported = true;
+				if (pdo_pps_apdo_min_voltage(pdo) >= PD_PPS_MIN_VOLT_MV)
+					port->pps_data.supported = true;
 			} else if (pdo_apdo_type(pdo) == APDO_TYPE_SPR_AVS) {
 				port->spr_avs_data.port_partner_src_status = SPR_AVS_SUPPORTED;
 				port->spr_avs_data.port_partner_src_pdo_index = i;
@@ -4587,6 +4588,11 @@ static unsigned int tcpm_pd_select_pps_apdo(struct tcpm_port *port)
 		case PDO_TYPE_APDO:
 			if (pdo_apdo_type(pdo) != APDO_TYPE_PPS) {
 				tcpm_log(port, "Not PPS APDO (source), ignoring");
+				continue;
+			}
+
+			if (pdo_pps_apdo_min_voltage(pdo) < PD_PPS_MIN_VOLT_MV) {
+				tcpm_log(port, "Invalid PPS APDO minimum voltage, ignoring");
 				continue;
 			}
 
