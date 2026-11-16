@@ -1451,8 +1451,10 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 				}
 			}
 
-			if (vb->planes[plane].dbuf_duplicated)
+			if (vb->planes[plane].dbuf_duplicated) {
+				planes[plane].dbuf = NULL;
 				continue;
+			}
 
 			/* Acquire each plane's memory */
 			mem_priv = call_ptr_memop(attach_dmabuf,
@@ -1468,6 +1470,8 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 
 			vb->planes[plane].dbuf = planes[plane].dbuf;
 			vb->planes[plane].mem_priv = mem_priv;
+			/* The vb2 plane now owns the reference acquired above. */
+			planes[plane].dbuf = NULL;
 
 			/*
 			 * This pins the buffer(s) with dma_buf_map_attachment()). It's done
@@ -1483,8 +1487,10 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 			vb->planes[plane].dbuf_mapped = 1;
 		}
 	} else {
-		for (plane = 0; plane < vb->num_planes; ++plane)
+		for (plane = 0; plane < vb->num_planes; ++plane) {
 			dma_buf_put(planes[plane].dbuf);
+			planes[plane].dbuf = NULL;
+		}
 	}
 
 	/*
@@ -1519,14 +1525,15 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 
 	return 0;
 
+err_put_vb2_buf:
+	/* Release imported planes, then any references not yet transferred. */
+	__vb2_buf_dmabuf_put(vb);
 err_put_planes:
+	/* Validation failures leave the existing buffer and driver state intact. */
 	for (plane = 0; plane < vb->num_planes; ++plane) {
 		if (!IS_ERR_OR_NULL(planes[plane].dbuf))
 			dma_buf_put(planes[plane].dbuf);
 	}
-err_put_vb2_buf:
-	/* In case of errors, release planes that were already acquired */
-	__vb2_buf_dmabuf_put(vb);
 
 	return ret;
 }
