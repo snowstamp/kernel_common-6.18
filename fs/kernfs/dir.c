@@ -307,15 +307,14 @@ struct kernfs_node *kernfs_get_parent(struct kernfs_node *kn)
 }
 
 /**
- *	kernfs_name_hash - calculate hash of @ns + @name
+ *	kernfs_name_hash - calculate hash of @name
  *	@name: Null terminated string to hash
- *	@ns:   Namespace tag to hash
  *
- *	Return: 31-bit hash of ns + name (so it fits in an off_t)
+ *	Return: 31-bit hash of name (so it fits in an off_t)
  */
-static unsigned int kernfs_name_hash(const char *name, const void *ns)
+static unsigned int kernfs_name_hash(const char *name)
 {
-	unsigned long hash = init_name_hash(ns);
+	unsigned long hash = init_name_hash(NULL);
 	unsigned int len = strlen(name);
 	while (len--)
 		hash = partial_name_hash(*name++, hash);
@@ -820,7 +819,7 @@ int kernfs_add_one(struct kernfs_node *kn)
 	if (parent->flags & (KERNFS_REMOVING | KERNFS_EMPTY_DIR))
 		goto out_unlock;
 
-	kn->hash = kernfs_name_hash(kernfs_rcu_name(kn), kn->ns);
+	kn->hash = kernfs_name_hash(kernfs_rcu_name(kn));
 
 	ret = kernfs_link_sibling(kn);
 	if (ret)
@@ -880,7 +879,7 @@ static struct kernfs_node *kernfs_find_ns(struct kernfs_node *parent,
 		return NULL;
 	}
 
-	hash = kernfs_name_hash(name, ns);
+	hash = kernfs_name_hash(name);
 	while (node) {
 		struct kernfs_node *kn;
 		int result;
@@ -1868,7 +1867,7 @@ int kernfs_rename_ns(struct kernfs_node *kn, struct kernfs_node *new_parent,
 			rcu_assign_pointer(kn->name, new_name);
 	}
 
-	kn->hash = kernfs_name_hash(new_name ?: old_name, kn->ns);
+	kn->hash = kernfs_name_hash(new_name ?: old_name);
 	kernfs_link_sibling(kn);
 
 	if (new_name && !is_kernel_rodata((unsigned long)old_name))
@@ -1899,7 +1898,7 @@ static struct kernfs_node *kernfs_dir_pos(const void *ns,
 	if (pos) {
 		int valid = kernfs_active(pos) &&
 			rcu_access_pointer(pos->__parent) == parent &&
-			hash == pos->hash;
+			hash == pos->hash && pos->ns == ns;
 		kernfs_put(pos);
 		if (!valid)
 			pos = NULL;
