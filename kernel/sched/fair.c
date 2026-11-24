@@ -13906,6 +13906,10 @@ static void attach_task_cfs_rq(struct task_struct *p)
 static void switched_from_fair(struct rq *rq, struct task_struct *p)
 {
 	detach_task_cfs_rq(p);
+#ifdef CONFIG_CFS_BANDWIDTH
+	/* Fair-class throttle state must not survive a class change. */
+	p->throttled = false;
+#endif
 }
 
 static void switched_to_fair(struct rq *rq, struct task_struct *p)
